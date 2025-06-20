@@ -25,6 +25,10 @@ initial_setup() {
 
     # Verifikasi DNS domain
     echo "Memverifikasi domain $domain..."
+    if ! command -v dig &> /dev/null; then
+        apt install -y dnsutils
+    fi
+    
     resolved_ip=$(dig +short "$domain" | tail -n1)
     vps_ip=$(curl -s ifconfig.me)
     echo "Domain mengarah ke: $resolved_ip"
@@ -38,7 +42,7 @@ initial_setup() {
 
     uuid=$(cat /proc/sys/kernel/random/uuid)
 
-    mkdir -p "$(dirname $V2RAY_CONFIG)"
+    mkdir -p "$(dirname "$V2RAY_CONFIG")"
     cat > "$V2RAY_CONFIG" << EOF
 {
   "inbounds": [{
@@ -67,7 +71,7 @@ initial_setup() {
 EOF
 
     # Setup Nginx untuk HTTP (sementara)
-    mkdir -p "$(dirname $NGINX_CONFIG)"
+    mkdir -p "$(dirname "$NGINX_CONFIG")"
     cat > "$NGINX_CONFIG" << EOF
 server {
     listen 80;
@@ -87,7 +91,10 @@ EOF
     nginx -t && systemctl reload nginx
 
     # Dapatkan sertifikat SSL
-    certbot --nginx -d "$domain" --non-interactive --agree-tos -m "$email"
+    if ! certbot --nginx -d "$domain" --non-interactive --agree-tos -m "$email"; then
+        echo "❌ Gagal mendapatkan sertifikat SSL"
+        exit 1
+    fi
 
     # Konfigurasi HTTPS
     cat > "$NGINX_CONFIG" << EOF
@@ -126,7 +133,13 @@ EOF
 show_config() {
     local uuid=$1
     local email=$2
-    local domain=$(grep -m1 "server_name" "$NGINX_CONFIG" | awk '{print $2}' | tr -d ';')
+    local domain
+    
+    if [ -f "$NGINX_CONFIG" ]; then
+        domain=$(grep -m1 "server_name" "$NGINX_CONFIG" | awk '{print $2}' | tr -d ';')
+    else
+        domain="your-domain.com"
+    fi
     
     echo -e "\n🔐 Config untuk user: $email"
     echo "Domain : $domain"
@@ -134,7 +147,23 @@ show_config() {
     echo "Path   : /ws"
     echo "Port   : 443"
 
-    local link=$(echo -n '{"v":"2","ps":"v2ray-'$email'","add":"'$domain'","port":"443","id":"'$uuid'","aid":"0","net":"ws","type":"none","host":"'$domain'","path":"/ws","tls":"tls"}' | base64 -w 0)
+    local vmess_config=$(cat <<EOF
+{
+  "v": "2",
+  "ps": "v2ray-$email",
+  "add": "$domain",
+  "port": "443",
+  "id": "$uuid",
+  "aid": "0",
+  "net": "ws",
+  "type": "none",
+  "host": "$domain",
+  "path": "/ws",
+  "tls": "tls"
+}
+EOF
+)
+    local link=$(echo -n "$vmess_config" | base64 -w 0)
     echo -e "\nvmess://$link"
 }
 
@@ -151,9 +180,13 @@ add_user() {
     fi
 
     cp "$V2RAY_CONFIG" "$V2RAY_CONFIG.bak"
-    jq --arg uuid "$uuid" --arg email "$email" \
-    '.inbounds[0].settings.clients += [{"id":$uuid,"alterId":0,"email":$email}]' \
-    "$V2RAY_CONFIG.bak" > "$V2RAY_CONFIG"
+    if ! jq --arg uuid "$uuid" --arg email "$email" \
+      '.inbounds[0].settings.clients += [{"id":$uuid,"alterId":0,"email":$email}]' \
+      "$V2RAY_CONFIG.bak" > "$V2RAY_CONFIG"; then
+        echo "❌ Gagal menambah user"
+        mv "$V2RAY_CONFIG.bak" "$V2RAY_CONFIG"
+        exit 1
+    fi
 
     systemctl restart v2ray
     echo -e "\n✅ User berhasil ditambahkan!"
@@ -170,4 +203,72 @@ delete_user() {
     fi
 
     echo "Daftar user:"
-    jq -r '.inbounds[0].settings.clients[] | "
+    jq -r '.inbounds[0].settings.clients[] | "\(.email) - \(.id)"' "$V2RAY_CONFIG"
+    
+    read -p "Masukkan email/UUID user yang akan dihapus: " target
+    
+    cp "$V2RAY_CONFIG" "$V2RAY_CONFIG.bak"
+    if [[ "$target" == *"@"* ]]; then
+        if ! jq --arg email "$target" \
+          'del(.inbounds[0].settings.clients[] | select(.email == $email))' \
+          "$V2RAY_CONFIG.bak" > "$V2RAY_CONFIG"; then
+            echo "❌ Gagal menghapus user"
+            mv "$V2RAY_CONFIG.bak" "$V2RAY_CONFIG"
+            exit 1
+        fi
+    else
+        if ! jq --arg uuid "$target" \
+          'del(.inbounds[0].settings.clients[] | select(.id == $uuid))' \
+          "$V2RAY_CONFIG.bak" > "$V2RAY_CONFIG"; then
+            echo "❌ Gagal menghapus user"
+            mv "$V2RAY_CONFIG.bak" "$V2RAY_CONFIG"
+            exit 1
+        fi
+    fi
+    
+    systemctl restart v2ray
+    echo "✅ User berhasil dihapus!"
+}
+
+# Fungsi menu utama
+main_menu() {
+    echo -e "\n=== V2Ray Manager ==="
+    echo "1) Install V2Ray + Buat User Awal"
+    echo "2) Tambah User Baru"
+    echo "3) Hapus User"
+    echo "4) Tampilkan Daftar User"
+    echo "5) Keluar"
+    
+    read -p "Pilih menu [1-5]: " choice
+    case "$choice" in
+        1) initial_setup ;;
+        2) add_user ;;
+        3) delete_user ;;
+        4) 
+            if [ -f "$V2RAY_CONFIG" ]; then
+                echo "Daftar user:"
+                jq -r '.inbounds[0].settings.clients[] | "\(.email) - \(.id)"' "$V2RAY_CONFIG"
+            else
+                echo "❌ V2Ray belum terinstall"
+            fi
+            ;;
+        5) exit 0 ;;
+        *) echo "Pilihan tidak valid"; main_menu ;;
+    esac
+}
+
+# Cek root
+if [[ $EUID -ne 0 ]]; then
+    echo "Script ini harus dijalankan sebagai root." >&2
+    exit 1
+fi
+
+# Install atau jalankan menu
+if [ "$0" = "$INSTALL_PATH" ]; then
+    main_menu
+else
+    # Install script sebagai command 'start'
+    cp "$0" "$INSTALL_PATH"
+    chmod +x "$INSTALL_PATH"
+    echo -e "\nUntuk menjalankan manager ketik:\nstart\n"
+fi
