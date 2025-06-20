@@ -72,6 +72,9 @@ EOF
 
     # Setup Nginx untuk HTTP (sementara)
     mkdir -p "$(dirname "$NGINX_CONFIG")"
+    mkdir -p /etc/nginx/sites-enabled
+    mkdir -p /etc/nginx/sites-available
+mkd ir -p /etc/nginx/sites-enabled
     cat > "$NGINX_CONFIG" << EOF
 server {
     listen 80;
