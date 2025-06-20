@@ -8,6 +8,7 @@ INSTALL_PATH="/usr/local/bin/start"
 
 # Fungsi untuk install dependensi
 install_dependencies() {
+    echo "Memulai instalasi dependensi..."
     apt update -y
     apt install -y \
         jq \
@@ -20,25 +21,30 @@ install_dependencies() {
         nginx \
         certbot \
         python3-certbot-nginx
+    
+    echo "✅ Dependensi berhasil diinstall"
 }
 
 # Fungsi install V2Ray
 install_v2ray() {
+    echo "Memulai instalasi V2Ray..."
     curl -O https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh
     bash install-release.sh
+    echo "✅ V2Ray berhasil diinstall"
 }
 
 # Fungsi setup awal
 initial_setup() {
+    # Install semua dependensi terlebih dahulu
+    install_dependencies
+    install_v2ray
+    
+    # Setelah semua terinstall, minta input domain
     read -p "Masukkan domain anda (sudah diarahkan ke IP VPS): " domain
     read -p "Masukkan email Anda untuk notifikasi SSL: " email
 
     # Verifikasi DNS domain
     echo "Memverifikasi domain $domain..."
-    if ! command -v dig &> /dev/null; then
-        apt install -y dnsutils
-    fi
-    
     resolved_ip=$(dig +short "$domain" | tail -n1)
     vps_ip=$(curl -s ifconfig.me)
     echo "Domain mengarah ke: $resolved_ip"
@@ -100,9 +106,10 @@ EOF
 
     ln -sf "$NGINX_CONFIG" /etc/nginx/sites-enabled/v2ray
     rm -f /etc/nginx/sites-enabled/default
-    nginx -t && systemctl reload nginx
+    systemctl restart nginx
 
     # Dapatkan sertifikat SSL
+    echo "Mendapatkan sertifikat SSL untuk domain $domain..."
     if ! certbot --nginx -d "$domain" --non-interactive --agree-tos -m "$email"; then
         echo "❌ Gagal mendapatkan sertifikat SSL"
         exit 1
@@ -134,7 +141,7 @@ server {
 }
 EOF
 
-    nginx -t && systemctl reload nginx
+    systemctl restart nginx
     systemctl enable --now v2ray
 
     echo -e "\n✅ Instalasi selesai!"
@@ -181,8 +188,6 @@ EOF
 
 # Tambah user baru
 add_user() {
-    install_dependencies
-
     local uuid=$(cat /proc/sys/kernel/random/uuid)
     read -p "Masukkan email/nama user baru: " email
 
@@ -207,8 +212,6 @@ add_user() {
 
 # Hapus user
 delete_user() {
-    install_dependencies
-
     if [ ! -f "$V2RAY_CONFIG" ]; then
         echo "❌ File konfigurasi tidak ditemukan!"
         exit 1
@@ -280,6 +283,7 @@ if [[ "$(realpath "$0")" == "$INSTALL_PATH" ]]; then
     main_menu
 else
     # Install script dari GitHub ke /usr/local/bin/start
+    echo "Menginstall script ke $INSTALL_PATH..."
     wget -qO "$INSTALL_PATH" https://raw.githubusercontent.com/Septahadif/vmess/main/v2ray-manager.sh
     chmod +x "$INSTALL_PATH"
 
