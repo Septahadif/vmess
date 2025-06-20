@@ -9,7 +9,17 @@ INSTALL_PATH="/usr/local/bin/start"
 # Fungsi untuk install dependensi
 install_dependencies() {
     apt update -y
-    apt install -y jq curl wget gnupg2 ca-certificates lsb-release dnsutils nginx certbot python3-certbot-nginx
+    apt install -y \
+        jq \
+        curl \
+        wget \
+        gnupg2 \
+        ca-certificates \
+        lsb-release \
+        dnsutils \
+        nginx \
+        certbot \
+        python3-certbot-nginx
 }
 
 # Fungsi install V2Ray
