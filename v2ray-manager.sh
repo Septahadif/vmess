@@ -264,11 +264,11 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # Install atau jalankan menu
-if [ "$0" = "$INSTALL_PATH" ]; then
+if [[ "$(realpath "$0")" == "$INSTALL_PATH" ]]; then
     main_menu
 else
-    # Install script sebagai command 'start'
-    cp "$0" "$INSTALL_PATH"
+    # Unduh ulang dari GitHub sebagai 'start'
+    wget -qO "$INSTALL_PATH" https://raw.githubusercontent.com/Septahadif/vmess/main/v2ray-manager.sh
     chmod +x "$INSTALL_PATH"
-    echo -e "\nUntuk menjalankan manager ketik:\nstart\n"
+    echo -e "\n✅ Instalasi selesai. Jalankan manager dengan perintah:\nstart\n"
 fi
